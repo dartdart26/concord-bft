@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 #include "rapidcheck/rapidcheck.h"
+#include "rapidcheck/state.h"
 #include "rapidcheck/extras/gtest.h"
 
 #include "storage_test_common.h"
@@ -377,6 +378,53 @@ TEST_P(db_adapter_kv_tests, key_deletion) {
     }
   };
 
+  ASSERT_TRUE(rc::check(test));
+}
+
+struct BlockchainModel {
+  std::vector<SetOfKeyValuePairs> blocks;
+};
+
+struct AddBlock : rc::state::Command<BlockchainModel, DBAdapter> {
+  const SetOfKeyValuePairs blockUpdates{*rc::gen::arbitrary<SetOfKeyValuePairs>()};
+
+  void apply(BlockchainModel &s0) const override { s0.blocks.push_back(blockUpdates); }
+
+  void run(const BlockchainModel &s0, DBAdapter &sut) const override {
+    // Add a block to the SUT.
+    const auto addedBlockId = sut.addBlock(blockUpdates);
+    // Get the next model state.
+    const auto s1 = nextState(s0);
+    // Verify states match.
+    RC_ASSERT(addedBlockId == s1.blocks.size());
+    RC_ASSERT(s1.blocks.size() == sut.getLastReachableBlockId());
+    RC_ASSERT(s1.blocks[addedBlockId - 1] == sut.getBlockData(sut.getRawBlock(addedBlockId)));
+  }
+};
+
+struct DeleteLastReachableBlock : rc::state::Command<BlockchainModel, DBAdapter> {
+  void apply(BlockchainModel &s0) const override {
+    if (!s0.blocks.empty()) {
+      s0.blocks.pop_back();
+    }
+  }
+
+  void run(const BlockchainModel &s0, DBAdapter &sut) const override {
+    // Delete the last reachable block.
+    sut.deleteLastReachableBlock();
+    // Get the next model state.
+    const auto s1 = nextState(s0);
+    RC_ASSERT(s1.blocks.size() == sut.getLastReachableBlockId());
+  }
+};
+
+TEST_P(db_adapter_block_tests, blockchain_model) {
+  const auto test = [this](const std::vector<SetOfKeyValuePairs> &initialBlocks) {
+    const auto initialState = BlockchainModel{initialBlocks};
+    auto sut = DBAdapter{GetParam()->db()};
+    addBlocks(initialBlocks, sut);
+    rc::state::check(initialState, sut, rc::state::gen::execOneOfWithArgs<AddBlock, DeleteLastReachableBlock>());
+  };
   ASSERT_TRUE(rc::check(test));
 }
 
