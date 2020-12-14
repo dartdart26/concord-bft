@@ -36,7 +36,7 @@ using namespace concord::kvbc::categorization;
 using namespace concord::kvbc::categorization::detail;
 using namespace std::literals;
 
-class shared_kv_category_test : public Test {
+class shared_kv_category : public Test {
   void SetUp() override {
     cleanup();
     db = TestRocksDb::createNative();
@@ -62,14 +62,14 @@ class shared_kv_category_test : public Test {
   std::shared_ptr<NativeClient> db;
 };
 
-TEST_F(shared_kv_category_test, create_column_families_on_construction) {
+TEST_F(shared_kv_category, create_column_families_on_construction) {
   auto cat = SharedKeyValueCategory{db};
   ASSERT_THAT(db->columnFamilies(),
               ContainerEq(std::unordered_set<std::string>{
                   db->defaultColumnFamily(), SHARED_KV_DATA_CF, SHARED_KV_KEY_VERSIONS_CF}));
 }
 
-TEST_F(shared_kv_category_test, empty_updates) {
+TEST_F(shared_kv_category, empty_updates) {
   auto update = SharedKeyValueUpdatesData{};
   update.calculate_root_hash = true;
   auto batch = db->getBatch();
@@ -77,7 +77,7 @@ TEST_F(shared_kv_category_test, empty_updates) {
   ASSERT_THROW(cat.add(1, std::move(update), batch), std::invalid_argument);
 }
 
-TEST_F(shared_kv_category_test, key_without_categories) {
+TEST_F(shared_kv_category, key_without_categories) {
   auto update = SharedKeyValueUpdatesData{};
   update.calculate_root_hash = true;
   update.kv["k1"] = SharedValueData{"v1", {"c1"}};
@@ -87,7 +87,7 @@ TEST_F(shared_kv_category_test, key_without_categories) {
   ASSERT_THROW(cat.add(1, std::move(update), batch), std::invalid_argument);
 }
 
-TEST_F(shared_kv_category_test, calculate_root_hash_toggle) {
+TEST_F(shared_kv_category, calculate_root_hash_toggle) {
   auto batch = db->getBatch();
   auto cat = SharedKeyValueCategory{db};
 
@@ -108,7 +108,7 @@ TEST_F(shared_kv_category_test, calculate_root_hash_toggle) {
   }
 }
 
-TEST_F(shared_kv_category_test, add_one_key_per_category) {
+TEST_F(shared_kv_category, add_one_key_per_category) {
   auto update = SharedKeyValueUpdatesData{};
   update.calculate_root_hash = true;
   update.kv["k1"] = SharedValueData{"v1", {"c1"}};
@@ -176,7 +176,7 @@ TEST_F(shared_kv_category_test, add_one_key_per_category) {
   }
 }
 
-TEST_F(shared_kv_category_test, add_key_in_two_categories) {
+TEST_F(shared_kv_category, add_key_in_two_categories) {
   auto update = SharedKeyValueUpdatesData{};
   update.calculate_root_hash = true;
   update.kv["k1"] = SharedValueData{"v1", {"c1", "c2"}};
@@ -229,7 +229,7 @@ TEST_F(shared_kv_category_test, add_key_in_two_categories) {
   }
 }
 
-TEST_F(shared_kv_category_test, add_two_keys_in_one_category) {
+TEST_F(shared_kv_category, add_two_keys_in_one_category) {
   auto update = SharedKeyValueUpdatesData{};
   update.calculate_root_hash = true;
   update.kv["k1"] = SharedValueData{"v1", {"c1"}};
@@ -290,7 +290,7 @@ TEST_F(shared_kv_category_test, add_two_keys_in_one_category) {
   }
 }
 
-TEST_F(shared_kv_category_test, multi_versioned_key_in_one_category) {
+TEST_F(shared_kv_category, multi_versioned_key_in_one_category) {
   auto cat = SharedKeyValueCategory{db};
 
   // Block 1.
@@ -335,6 +335,245 @@ TEST_F(shared_kv_category_test, multi_versioned_key_in_one_category) {
                 ContainerEq(std::map<std::string, std::vector<std::uint64_t>>{
                     std::make_pair("c"s, std::vector<std::uint64_t>{1, 2})}));
   }
+}
+
+TEST_F(shared_kv_category, get) {
+  auto cat = SharedKeyValueCategory{db};
+
+  // Block 2.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v2", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(2, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Block 4.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v4", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(4, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Get at block 2.
+  {
+    const auto v2 = cat.get("c", "k", 2);
+    ASSERT_TRUE(v2);
+    ASSERT_EQ(v2->data, "v2");
+    ASSERT_EQ(v2->block_id, 2);
+    ASSERT_FALSE(v2->expire_at);
+  }
+
+  // Get at block 4.
+  {
+    const auto v4 = cat.get("c", "k", 4);
+    ASSERT_TRUE(v4);
+    ASSERT_EQ(v4->data, "v4");
+    ASSERT_EQ(v4->block_id, 4);
+    ASSERT_FALSE(v4->expire_at);
+  }
+
+  // Get at non-existent blocks.
+  {
+    const auto v1 = cat.get("c", "k", 1);
+    ASSERT_FALSE(v1);
+
+    const auto v3 = cat.get("c", "k", 3);
+    ASSERT_FALSE(v3);
+
+    const auto v5 = cat.get("c", "k", 5);
+    ASSERT_FALSE(v5);
+  }
+}
+
+TEST_F(shared_kv_category, get_until_block_with_one_version) {
+  auto cat = SharedKeyValueCategory{db};
+
+  // Block 2.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v2", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(2, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Get at the non-existent pervious block 1.
+  {
+    const auto v1 = cat.getUntilBlock("c", "k", 1);
+    ASSERT_FALSE(v1);
+  }
+
+  // Get at an exact block 2.
+  {
+    const auto v2 = cat.getUntilBlock("c", "k", 2);
+    ASSERT_TRUE(v2);
+    ASSERT_EQ(v2->data, "v2");
+    ASSERT_EQ(v2->block_id, 2);
+    ASSERT_FALSE(v2->expire_at);
+  }
+
+  // Get at a non-exact block 42, after block 2.
+  {
+    const auto v2 = cat.getUntilBlock("c", "k", 42);
+    ASSERT_TRUE(v2);
+    ASSERT_EQ(v2->data, "v2");
+    ASSERT_EQ(v2->block_id, 2);
+    ASSERT_FALSE(v2->expire_at);
+  }
+}
+
+TEST_F(shared_kv_category, get_until_block_with_two_versions) {
+  auto cat = SharedKeyValueCategory{db};
+
+  // Block 5.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v5", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(5, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Block 8.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v8", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(8, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Get at the non-existent pervious block 3.
+  {
+    const auto v3 = cat.getUntilBlock("c", "k", 3);
+    ASSERT_FALSE(v3);
+  }
+
+  // Get at an exact block 5.
+  {
+    const auto v5 = cat.getUntilBlock("c", "k", 5);
+    ASSERT_TRUE(v5);
+    ASSERT_EQ(v5->data, "v5");
+    ASSERT_EQ(v5->block_id, 5);
+    ASSERT_FALSE(v5->expire_at);
+  }
+
+  // Get at a non-exact block 6, but before block 8.
+  {
+    const auto v5 = cat.getUntilBlock("c", "k", 6);
+    ASSERT_TRUE(v5);
+    ASSERT_EQ(v5->data, "v5");
+    ASSERT_EQ(v5->block_id, 5);
+    ASSERT_FALSE(v5->expire_at);
+  }
+
+  // Get at an exact block 8.
+  {
+    const auto v8 = cat.getUntilBlock("c", "k", 8);
+    ASSERT_TRUE(v8);
+    ASSERT_EQ(v8->data, "v8");
+    ASSERT_EQ(v8->block_id, 8);
+    ASSERT_FALSE(v8->expire_at);
+  }
+
+  // Get at a non-exact block 42, after block 8.
+  {
+    const auto v8 = cat.getUntilBlock("c", "k", 42);
+    ASSERT_TRUE(v8);
+    ASSERT_EQ(v8->data, "v8");
+    ASSERT_EQ(v8->block_id, 8);
+    ASSERT_FALSE(v8->expire_at);
+  }
+}
+
+TEST_F(shared_kv_category, get_latest) {
+  auto cat = SharedKeyValueCategory{db};
+
+  // Block 1.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v1", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(1, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  // Block 6.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v6", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(6, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  const auto v6 = cat.getLatest("c", "k");
+  ASSERT_TRUE(v6);
+  ASSERT_EQ(v6->data, "v6");
+  ASSERT_EQ(v6->block_id, 6);
+  ASSERT_FALSE(v6->expire_at);
+}
+
+TEST_F(shared_kv_category, get_for_non_existent_category) {
+  auto cat = SharedKeyValueCategory{db};
+
+  // Block 1.
+  {
+    auto update = SharedKeyValueUpdatesData{};
+    update.calculate_root_hash = true;
+    update.kv["k"] = SharedValueData{"v1", {"c"}};
+
+    auto batch = db->getBatch();
+    cat.add(1, std::move(update), batch);
+    db->write(std::move(batch));
+  }
+
+  ASSERT_FALSE(cat.get("non-existent-cat", "k", 1));
+  ASSERT_FALSE(cat.getUntilBlock("non-existent-cat", "k", 2));
+  ASSERT_FALSE(cat.getLatest("non-existent-cat", "k"));
+}
+
+TEST_F(shared_kv_category, get_proof) {
+  auto update = SharedKeyValueUpdatesData{};
+  update.calculate_root_hash = true;
+  update.kv["k1"] = SharedValueData{"v1", {"c"}};
+  update.kv["k2"] = SharedValueData{"v2", {"c"}};
+
+  const auto block_id = 1;
+  auto batch = db->getBatch();
+  auto cat = SharedKeyValueCategory{db};
+  const auto update_info = cat.add(block_id, std::move(update), batch);
+  ASSERT_TRUE(update_info.category_root_hashes);
+  db->write(std::move(batch));
+
+  const auto proof = cat.getProof("c", "k1", block_id, update_info);
+  ASSERT_TRUE(proof);
+  ASSERT_EQ(proof->key, "k1");
+  ASSERT_EQ(proof->value.data, "v1");
+  ASSERT_EQ(proof->value.block_id, 1);
+  ASSERT_FALSE(proof->value.expire_at);
+  ASSERT_EQ(proof->key_value_index, 0);
+  const auto cat_root_hash_it = update_info.category_root_hashes->find("c");
+  ASSERT_NE(cat_root_hash_it, update_info.category_root_hashes->cend());
+  ASSERT_EQ(proof->calculateRootHash(), cat_root_hash_it->second);
 }
 
 }  // namespace

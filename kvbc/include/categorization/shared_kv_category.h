@@ -65,30 +65,29 @@ class SharedKeyValueCategory {
                                 const SharedKeyValueUpdatesInfo &updates_info,
                                 storage::rocksdb::NativeWriteBatch &);
 
-  // Get the value of a key in `category_id` with a block version up to `max_block_id`.
-  // Return std::nullopt if the key doesn't exist in any earlier blocks than `max_block_id`.
-  std::optional<Value> getValueUpToBlock(const std::string &category_id,
-                                         const std::string &key,
-                                         BlockId max_block_id) const;
-
   // Get the value of a key in `category_id` at `block_id`.
   // Return std::nullopt if the key doesn't exist at `block_id`.
-  std::optional<Value> getValueAtBlock(const std::string &category_id, const std::string &key, BlockId block_id) const;
+  std::optional<Value> get(const std::string &category_id, const std::string &key, BlockId block_id) const;
+
+  // Get the value of a key in `category_id` until `block_id`.
+  // Return std::nullopt if the key doesn't exist in any earlier blocks than `block_id`.
+  std::optional<Value> getUntilBlock(const std::string &category_id, const std::string &key, BlockId block_id) const;
 
   // Get the latest value of a key in `category_id`.
   // Return std::nullopt if the key doesn't exist.
-  std::optional<Value> getLatestValue(const std::string &category_id, const std::string &key) const;
+  std::optional<Value> getLatest(const std::string &category_id, const std::string &key) const;
 
   // Get the value of a key and a proof for it in `category_id` at the given `block_id`.
   // `updates_info` must be the updates for `block_id`.
   // Return std::nullopt if the key doesn't exist at `block_id`.
-  std::optional<KeyValueProof> getValueProofAtBlock(const std::string &category_id,
-                                                    const std::string &key,
-                                                    BlockId block_id,
-                                                    const SharedKeyValueUpdatesInfo &updates_info) const;
+  std::optional<KeyValueProof> getProof(const std::string &category_id,
+                                        const std::string &key,
+                                        BlockId block_id,
+                                        const SharedKeyValueUpdatesInfo &updates_info) const;
 
  private:
   KeyVersionsPerCategory versionsForKey(const Hash &key_hash) const;
+  Value getValue(const Hash &key_hash, BlockId block_id) const;
 
  private:
   const std::shared_ptr<storage::rocksdb::NativeClient> db_;

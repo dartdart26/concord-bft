@@ -17,6 +17,7 @@
 #include "categorization/column_families.h"
 #include "categorization/details.h"
 
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 #include <string_view>
@@ -45,6 +46,36 @@ void finishCategoryHashes(std::map<std::string, Hasher> &category_hashers, Share
     category_hashes[category_id] = hasher.finish();
   }
   update_info.category_root_hashes = std::move(category_hashes);
+}
+
+bool hasVersion(const std::string &category_id, BlockId block_id, const KeyVersionsPerCategory &key_versions) {
+  auto cat_it = key_versions.data.find(category_id);
+  if (cat_it == key_versions.data.end()) {
+    return false;
+  }
+  const auto &versions = cat_it->second;
+  ConcordAssert(!versions.empty());
+  auto ver_it = std::lower_bound(versions.begin(), versions.cend(), block_id);
+  if (ver_it != versions.cend() && *ver_it == block_id) {
+    return true;
+  }
+  return false;
+}
+
+std::optional<BlockId> lastVersionUntil(const std::string &category_id,
+                                        BlockId block_id,
+                                        const KeyVersionsPerCategory &key_versions) {
+  auto cat_it = key_versions.data.find(category_id);
+  if (cat_it == key_versions.data.end()) {
+    return std::nullopt;
+  }
+  const auto &versions = cat_it->second;
+  ConcordAssert(!versions.empty());
+  auto ver_it = std::upper_bound(versions.begin(), versions.cend(), block_id);
+  if (ver_it == versions.cbegin()) {
+    return std::nullopt;
+  }
+  return *(ver_it - 1);
 }
 
 SharedKeyValueCategory::SharedKeyValueCategory(const std::shared_ptr<storage::rocksdb::NativeClient> &db) : db_{db} {
@@ -110,6 +141,79 @@ SharedKeyValueUpdatesInfo SharedKeyValueCategory::add(BlockId block_id,
   return update_info;
 }
 
+std::optional<Value> SharedKeyValueCategory::get(const std::string &category_id,
+                                                 const std::string &key,
+                                                 BlockId block_id) const {
+  const auto key_hash = hash(key);
+  const auto key_versions = versionsForKey(key_hash);
+  if (!hasVersion(category_id, block_id, key_versions)) {
+    return std::nullopt;
+  }
+  return getValue(key_hash, block_id);
+}
+
+std::optional<Value> SharedKeyValueCategory::getUntilBlock(const std::string &category_id,
+                                                           const std::string &key,
+                                                           BlockId block_id) const {
+  const auto key_hash = hash(key);
+  const auto key_versions = versionsForKey(key_hash);
+  const auto actual_block_id = lastVersionUntil(category_id, block_id, key_versions);
+  if (!actual_block_id) {
+    return std::nullopt;
+  }
+  return getValue(key_hash, *actual_block_id);
+}
+
+std::optional<Value> SharedKeyValueCategory::getLatest(const std::string &category_id, const std::string &key) const {
+  const auto key_hash = hash(key);
+  const auto key_versions = versionsForKey(key_hash);
+  auto cat_it = key_versions.data.find(category_id);
+  if (cat_it == key_versions.data.cend()) {
+    return std::nullopt;
+  }
+  const auto &versions = cat_it->second;
+  ConcordAssert(!versions.empty());
+  return getValue(key_hash, versions.back());
+}
+
+std::optional<KeyValueProof> SharedKeyValueCategory::getProof(const std::string &category_id,
+                                                              const std::string &key,
+                                                              BlockId block_id,
+                                                              const SharedKeyValueUpdatesInfo &updates_info) const {
+  auto value = get(category_id, key, block_id);
+  if (!value) {
+    return std::nullopt;
+  }
+
+  auto proof = KeyValueProof{};
+  proof.key = key;
+  proof.value = std::move(*value);
+
+  auto i = std::size_t{0};
+  for (const auto &[update_key, update_key_data] : updates_info.keys) {
+    if (update_key == key) {
+      proof.key_value_index = i;
+      continue;
+    }
+
+    if (std::find(update_key_data.categories.cbegin(), update_key_data.categories.cend(), category_id) !=
+        update_key_data.categories.cend()) {
+      const auto update_key_hash = hash(update_key);
+      const auto update_value = getValue(update_key_hash, block_id);
+      const auto update_value_hash = hash(update_value.data);
+
+      auto hasher = Hasher{};
+      hasher.init();
+      hasher.update(update_key_hash.data(), update_key_hash.size());
+      hasher.update(update_value_hash.data(), update_value_hash.size());
+      proof.ordered_complement_kv_hashes.push_back(hasher.finish());
+
+      ++i;
+    }
+  }
+  return proof;
+}
+
 KeyVersionsPerCategory SharedKeyValueCategory::versionsForKey(const Hash &key_hash) const {
   auto key_versions = KeyVersionsPerCategory{};
   const auto key_versions_db_value = db_->get(SHARED_KV_KEY_VERSIONS_CF, key_hash);
@@ -117,6 +221,12 @@ KeyVersionsPerCategory SharedKeyValueCategory::versionsForKey(const Hash &key_ha
     deserialize(*key_versions_db_value, key_versions);
   }
   return key_versions;
+}
+
+Value SharedKeyValueCategory::getValue(const Hash &key_hash, BlockId block_id) const {
+  auto value = db_->get(SHARED_KV_DATA_CF, serialize(versionedKey(key_hash, block_id)));
+  ConcordAssert(value.has_value());
+  return Value{std::move(*value), block_id, std::nullopt};
 }
 
 }  // namespace concord::kvbc::categorization::detail
