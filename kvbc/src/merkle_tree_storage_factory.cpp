@@ -29,7 +29,7 @@ namespace concord::kvbc::v2MerkleTree {
 
 std::shared_ptr<rocksdb::Statistics> completeRocksDBConfiguration(
     ::rocksdb::Options& db_options, std::vector<::rocksdb::ColumnFamilyDescriptor>& cf_descs) {
-  static constexpr size_t CACHE_SIZE = 1024 * 1024 * 1024 * 4ul;  // 4 GB
+  static constexpr size_t CACHE_SIZE = 1024 * 1024 * 32ul;
   auto table_options = ::rocksdb::BlockBasedTableOptions{};
   table_options.block_cache = ::rocksdb::NewLRUCache(CACHE_SIZE);
   table_options.filter_policy.reset(::rocksdb::NewBloomFilterPolicy(10, false));
