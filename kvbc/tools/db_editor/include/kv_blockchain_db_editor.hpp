@@ -65,6 +65,21 @@ struct GetGenesisBlockID {
   }
 };
 
+struct DeleteGenesisBlock {
+  const bool read_only = true;
+  std::string description() const {
+    return "deleteGenesisBlock\n"
+           "  Deletes the genesis block.";
+  }
+  std::string execute(const KeyValueBlockchain &adapter, const CommandArguments &) const {
+    const auto id = adapter.getGenesisBlockId();
+    if (!adapter.deleteBlock(id)) {
+      return toJson("deleteGenesisBlock", "failed");
+    }
+    return toJson("deleteGenesisBlock", id);
+  }
+};
+
 struct GetLastReachableBlockID {
   const bool read_only = true;
   std::string description() const {
@@ -523,6 +538,7 @@ struct RemoveMetadata {
 };
 
 using Command = std::variant<GetGenesisBlockID,
+                             DeleteGenesisBlock,
                              GetLastReachableBlockID,
                              GetLastStateTransferBlockID,
                              GetLastBlockID,
@@ -538,6 +554,7 @@ using Command = std::variant<GetGenesisBlockID,
                              RemoveMetadata>;
 inline const auto commands_map = std::map<std::string, Command>{
     std::make_pair("getGenesisBlockID", GetGenesisBlockID{}),
+    std::make_pair("deleteGenesisBlock", DeleteGenesisBlock{}),
     std::make_pair("getLastReachableBlockID", GetLastReachableBlockID{}),
     std::make_pair("getLastStateTransferBlockID", GetLastStateTransferBlockID{}),
     std::make_pair("getLastBlockID", GetLastBlockID{}),
