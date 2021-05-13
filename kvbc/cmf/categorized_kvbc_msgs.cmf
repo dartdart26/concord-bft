@@ -124,17 +124,8 @@ Msg KeyHash 4001 {
 }
 
 Msg VersionedKey 4002 {
-    # Exploit big-endian integer serialization to order different versions
-    # of the key by version.
+    uint64 version
     KeyHash key_hash
-    uint64 version
-}
-
-Msg VersionedRawKey 4003 {
-    # Exploit CMF string and big-endian integer serialization to order keys
-    # by size, key and version.
-    string value
-    uint64 version
 }
 
 Msg DbValue 4004 {

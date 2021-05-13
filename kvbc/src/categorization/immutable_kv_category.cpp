@@ -89,10 +89,9 @@ ImmutableOutput ImmutableKeyValueCategory::add(BlockId block_id,
     auto &value = node.mapped();
 
     // Calculate hashes (optionally) before moving them.
-    Hash key_hash;
+    const auto key_hash = hash(key);
     Hash value_hash;
     if (update.calculate_root_hash && !value.tags.empty()) {
-      key_hash = hash(key);
       value_hash = hash(value.data);
     }
 
@@ -100,7 +99,7 @@ ImmutableOutput ImmutableKeyValueCategory::add(BlockId block_id,
     const auto header =
         toSlice(serializeThreadLocal(ImmutableDbValueHeader{block_id, static_cast<std::uint32_t>(value.data.size())}));
     const auto slices = std::array<::rocksdb::Slice, 2>{header, toSlice(value.data)};
-    batch.put(cf_, key, slices);
+    batch.put(cf_, key_hash, slices);
 
     // Move the key and the tags to the update info and (optionally) update hashes per tag.
     auto &key_tags = update_info.tagged_keys.emplace(std::move(key), std::vector<std::string>{}).first->second;
@@ -118,6 +117,7 @@ ImmutableOutput ImmutableKeyValueCategory::add(BlockId block_id,
   }
   return update_info;
 }
+
 std::vector<std::string> ImmutableKeyValueCategory::getBlockStaleKeys(BlockId,
                                                                       const ImmutableOutput &updates_info) const {
   std::vector<std::string> stale_keys;
@@ -143,7 +143,7 @@ void ImmutableKeyValueCategory::deleteLastReachableBlock(BlockId,
 void ImmutableKeyValueCategory::deleteBlock(const ImmutableOutput &updates_info,
                                             storage::rocksdb::NativeWriteBatch &batch) {
   for (const auto &kv : updates_info.tagged_keys) {
-    batch.del(cf_, kv.first);
+    batch.del(cf_, hash(kv.first));
   }
 }
 
@@ -159,7 +159,7 @@ std::optional<Value> ImmutableKeyValueCategory::get(const std::string &key, Bloc
 }
 
 std::optional<Value> ImmutableKeyValueCategory::getLatest(const std::string &key) const {
-  const auto ser = db_->getSlice(cf_, key);
+  const auto ser = db_->getSlice(cf_, hash(key));
   if (!ser) {
     return std::nullopt;
   }
@@ -173,7 +173,7 @@ void ImmutableKeyValueCategory::multiGet(const std::vector<std::string> &keys,
 
   auto slices = std::vector<::rocksdb::PinnableSlice>{};
   auto statuses = std::vector<::rocksdb::Status>{};
-  db_->multiGet(cf_, keys, slices, statuses);
+  db_->multiGet(cf_, keyHashes(keys), slices, statuses);
 
   values.clear();
   for (auto i = 0ull; i < slices.size(); ++i) {
@@ -199,7 +199,7 @@ void ImmutableKeyValueCategory::multiGetLatest(const std::vector<std::string> &k
                                                std::vector<std::optional<Value>> &values) const {
   auto slices = std::vector<::rocksdb::PinnableSlice>{};
   auto statuses = std::vector<::rocksdb::Status>{};
-  db_->multiGet(cf_, keys, slices, statuses);
+  db_->multiGet(cf_, keyHashes(keys), slices, statuses);
 
   values.clear();
   for (auto i = 0ull; i < slices.size(); ++i) {
@@ -216,7 +216,7 @@ void ImmutableKeyValueCategory::multiGetLatest(const std::vector<std::string> &k
 }
 
 std::optional<TaggedVersion> ImmutableKeyValueCategory::getLatestVersion(const std::string &key) const {
-  const auto ser = db_->getSlice(cf_, key);
+  const auto ser = db_->getSlice(cf_, hash(key));
   if (!ser) {
     return std::nullopt;
   }
@@ -229,7 +229,7 @@ void ImmutableKeyValueCategory::multiGetLatestVersion(const std::vector<std::str
   const auto deleted = false;
   auto slices = std::vector<::rocksdb::PinnableSlice>{};
   auto statuses = std::vector<::rocksdb::Status>{};
-  db_->multiGet(cf_, keys, slices, statuses);
+  db_->multiGet(cf_, keyHashes(keys), slices, statuses);
 
   versions.clear();
   for (auto i = 0ull; i < slices.size(); ++i) {

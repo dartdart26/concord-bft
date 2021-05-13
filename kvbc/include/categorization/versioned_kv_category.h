@@ -100,13 +100,13 @@ class VersionedKeyValueCategory {
                   VersionedOutput &,
                   storage::rocksdb::NativeWriteBatch &);
 
-  void updateLatestKeyVersion(const std::string &key, TaggedVersion version, storage::rocksdb::NativeWriteBatch &);
+  void updateLatestKeyVersion(const Hash &key_hash, TaggedVersion version, storage::rocksdb::NativeWriteBatch &);
 
-  void putValue(const VersionedRawKey &, bool deleted, std::string_view value, storage::rocksdb::NativeWriteBatch &);
+  void putValue(const VersionedKey &, bool deleted, std::string_view value, storage::rocksdb::NativeWriteBatch &);
 
   void addKeyToUpdateInfo(std::string &&key, bool deleted, bool stale_on_update, VersionedOutput &);
 
-  std::unordered_map<BlockId, std::vector<std::string>> activeKeysFromPrunedBlocks(
+  std::unordered_map<BlockId, std::vector<Hash>> activeKeysFromPrunedBlocks(
       const std::map<std::string, VersionedKeyFlags> &kv) const;
 
  private:

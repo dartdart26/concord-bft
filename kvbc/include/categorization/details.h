@@ -34,11 +34,11 @@ Hash hash(const Span &span) {
 }
 
 inline VersionedKey versionedKey(const std::string &key, BlockId block_id) {
-  return VersionedKey{KeyHash{detail::hash(key)}, block_id};
+  return VersionedKey{block_id, KeyHash{detail::hash(key)}};
 }
 
 inline VersionedKey versionedKey(const Hash &key_hash, BlockId block_id) {
-  return VersionedKey{KeyHash{key_hash}, block_id};
+  return VersionedKey{block_id, KeyHash{key_hash}};
 }
 
 template <typename T>
@@ -95,6 +95,15 @@ inline bool createColumnFamilyIfNotExisting(const std::string &cf, storage::rock
 inline void sortAndRemoveDuplicates(std::vector<std::string> &vec) {
   std::sort(vec.begin(), vec.end());
   vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
+}
+
+inline std::vector<Hash> keyHashes(const std::vector<std::string> &keys) {
+  auto hashes = std::vector<Hash>{};
+  hashes.reserve(keys.size());
+  for (const auto &key : keys) {
+    hashes.push_back(hash(key));
+  }
+  return hashes;
 }
 
 }  // namespace concord::kvbc::categorization::detail

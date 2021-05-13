@@ -136,7 +136,7 @@ TEST_F(immutable_kv_category, key_without_tags) {
 
   // Verify DB.
   {
-    const auto ser = db->get(column_family, "k1"sv);
+    const auto ser = db->get(column_family, hash("k1"sv));
     ASSERT_TRUE(ser);
     auto db_value = ImmutableDbValue{};
     deserialize(*ser, db_value);
@@ -572,16 +572,16 @@ TEST_F(immutable_kv_category, delete_block) {
   const auto block_id = 42;
   const auto update_info = add(block_id, std::move(update));
 
-  ASSERT_TRUE(db->get(column_family, "k1"sv));
-  ASSERT_TRUE(db->get(column_family, "k2"sv));
+  ASSERT_TRUE(db->get(column_family, hash("k1"sv)));
+  ASSERT_TRUE(db->get(column_family, hash("k2"sv)));
 
   auto delete_batch = db->getBatch();
   cat.deleteBlock(update_info, delete_batch);
   ASSERT_EQ(delete_batch.count(), 2);
   db->write(std::move(delete_batch));
 
-  ASSERT_FALSE(db->get(column_family, "k1"sv));
-  ASSERT_FALSE(db->get(column_family, "k2"sv));
+  ASSERT_FALSE(db->get(column_family, hash("k1"sv)));
+  ASSERT_FALSE(db->get(column_family, hash("k2"sv)));
 }
 
 TEST_F(immutable_kv_category, get_methods) {

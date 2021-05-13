@@ -774,7 +774,7 @@ TEST_F(versioned_kv_category, delete_genesis_with_delete_and_update_afterwards) 
   }
 
   // Make sure key "k" is present in the active column family as block 2 (its latest version) was pruned.
-  ASSERT_TRUE(db->get(active_cf_, "k"sv));
+  ASSERT_TRUE(db->get(active_cf_, hash("k"sv)));
 }
 
 TEST_F(versioned_kv_category, delete_genesis_with_active_keys) {
@@ -798,8 +798,8 @@ TEST_F(versioned_kv_category, delete_genesis_with_active_keys) {
   }
 
   // Verify that keys are persisted in in the active key column family.
-  ASSERT_TRUE(db->get(active_cf_, "ka"sv));
-  ASSERT_TRUE(db->get(active_cf_, "kb"sv));
+  ASSERT_TRUE(db->get(active_cf_, hash("ka"sv)));
+  ASSERT_TRUE(db->get(active_cf_, hash("kb"sv)));
 
   // Add block 2 with the same 2 keys as in block 1.
   auto out2 = VersionedOutput{};
@@ -841,8 +841,8 @@ TEST_F(versioned_kv_category, delete_genesis_with_active_keys) {
   }
 
   // Verify that keys in the active key column family are deleted.
-  ASSERT_FALSE(db->get(active_cf_, "ka"sv));
-  ASSERT_FALSE(db->get(active_cf_, "kb"sv));
+  ASSERT_FALSE(db->get(active_cf_, hash("ka"sv)));
+  ASSERT_FALSE(db->get(active_cf_, hash("kb"sv)));
 }
 
 TEST_F(versioned_kv_category, delete_genesis_with_active_keys_and_previous_active_keys) {
@@ -866,8 +866,8 @@ TEST_F(versioned_kv_category, delete_genesis_with_active_keys_and_previous_activ
   }
 
   // Verify that keys are persisted in in the active key column family.
-  ASSERT_TRUE(db->get(active_cf_, "ka"sv));
-  ASSERT_TRUE(db->get(active_cf_, "kb"sv));
+  ASSERT_TRUE(db->get(active_cf_, hash("ka"sv)));
+  ASSERT_TRUE(db->get(active_cf_, hash("kb"sv)));
 
   // Add block 2 with the same 2 keys as in block 1.
   auto out2 = VersionedOutput{};
@@ -901,14 +901,14 @@ TEST_F(versioned_kv_category, delete_genesis_with_active_keys_and_previous_activ
 
   // Verify that keys in the active key column family are of version 2 and not 1.
   {
-    const auto ka = db->get(active_cf_, "ka"sv);
+    const auto ka = db->get(active_cf_, hash("ka"sv));
     ASSERT_TRUE(ka);
     auto ver_a = BlockVersion{};
     deserialize(*ka, ver_a);
     ASSERT_EQ(ver_a.version, 2);
   }
   {
-    const auto kb = db->get(active_cf_, "kb"sv);
+    const auto kb = db->get(active_cf_, hash("kb"sv));
     ASSERT_TRUE(kb);
     auto ver_b = BlockVersion{};
     deserialize(*kb, ver_b);
